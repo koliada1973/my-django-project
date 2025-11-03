@@ -28,3 +28,6 @@ celerybeat-schedule
 # logs
 logfile
 *.log
+# Office Temporary/Lock Files
+~$*
+*.tmp
