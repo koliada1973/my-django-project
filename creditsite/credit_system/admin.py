@@ -1,15 +1,27 @@
 from django.contrib import admin
-
-from .models import Client, Credit, Payment
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from django.contrib.auth.admin import UserAdmin as AuthUserAdmin
+from .models import Client, Credit, Payment
+
 
 
 class ClientAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'phone_number', 'address')
-    search_fields = ('user__username', 'phone_number')  # Пошук за логіном та телефоном
+    list_display = ('full_name', 'IPN', 'phone_number', 'address')
+    fields = ('user', 'middle_name', 'IPN', 'phone_number', 'address', 'date_of_birth')
+    readonly_fields = ('full_name',)
+    search_fields = ('user__username', 'phone_number')
+
+    def has_module_permission(self, request):
+        # Заборонити показ цього розділу у меню
+        return request.user.is_superuser
+
+    def get_full_name(self, obj):
+        return f"{obj.user.last_name} {obj.user.first_name}"
+
+    get_full_name.short_description = "Повне ім'я клієнта"
 
 admin.site.register(Client, ClientAdmin)
+
 
 class CreditAdmin(admin.ModelAdmin):
     list_display = ('id', 'client', 'summa_credit', 'percent', 'start_date', 'srok_months')
@@ -24,24 +36,50 @@ class PaymentAdmin(admin.ModelAdmin):
 admin.site.register(Payment, PaymentAdmin)
 
 
-# 2.1 Вбудована форма для додавання деталей Клієнта на сторінку User
 class ClientInlineForUser(admin.StackedInline):
     model = Client
     can_delete = False
     verbose_name_plural = 'Деталі Клієнта'
-    fields = ('phone_number', 'address', 'date_of_birth',)
+    fields = ('middle_name', 'IPN', 'phone_number', 'address', 'date_of_birth',)
+    readonly_fields = ('full_name',)
 
-
-# 2.2 Перевизначаємо форму User для вбудовування Client та керування правами
-admin.site.unregister(User)  # Видаляємо стандартний User
-
+admin.site.unregister(User)
 
 @admin.register(User)
-class CustomUserAdmin(AuthUserAdmin):
+class CustomUserAdmin(BaseUserAdmin):
     inlines = (ClientInlineForUser,)
-    list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff', 'is_active')
+    list_display = ('username', 'email','last_name', 'first_name', 'is_active')
 
+    # Обмеження видимості секцій
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = super().get_fieldsets(request, obj)
+
+        # Якщо користувач не суперюзер — приховуємо блок "Permissions"
+        if not request.user.is_superuser:
+            filtered = []
+            for name, section in fieldsets:
+                if name != 'Permissions':
+                    filtered.append((name, section))
+            return filtered
+        return fieldsets
+
+    # Поля лише для читання (менеджер не може міняти статуси)
+    def get_readonly_fields(self, request, obj=None):
+        if not request.user.is_superuser:
+            return ('is_staff', 'is_superuser', 'user_permissions', 'groups')
+        return super().get_readonly_fields(request, obj)
+
+    # Обмеження видимих користувачів
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        # Менеджер бачить тільки клієнтів (не staff)
+        return qs.filter(is_staff=False, is_superuser=False)
+
+    # Коли менеджер створює користувача — він завжди клієнт
     def save_model(self, request, obj, form, change):
-        if not change:
+        if not request.user.is_superuser:
             obj.is_staff = False
+            obj.is_superuser = False
         super().save_model(request, obj, form, change)
